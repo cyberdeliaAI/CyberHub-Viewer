@@ -1,4 +1,4 @@
-"""Meta Viewer module — drop an image to inspect its generation metadata."""
+"""Meta Viewer module — browse local images and inspect generation metadata."""
 
 import json
 import os
@@ -76,9 +76,9 @@ def rewrite_png_metadata(png_bytes, metadata):
 
 class ViewerModule(Module):
     name = "Viewer"
-    version = "1.1"
+    version = "1.2"
     icon = "\U0001F50D"   # 🔍
-    description = "Drop an image to view its generation metadata."
+    description = "Open an image or local folder to view generation metadata."
     order = 20
 
     settings_schema = {
@@ -193,6 +193,30 @@ PAGE_BODY = r"""
 .drop-zone .drop-main { font-size:13px; color:var(--text); }
 .drop-zone .drop-sub { font-size:11px; margin-top:2px; color:var(--text-dim); }
 .drop-zone input { display:none; }
+.viewer-source { display:flex; align-items:stretch; gap:10px; margin-bottom:14px; }
+.viewer-source .drop-zone { flex:1; margin:0; }
+.viewer-content [hidden] { display:none !important; }
+.viewer-folder-bar { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+.viewer-folder-name { flex:1; min-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:12px var(--mono); }
+.viewer-count { color:var(--text-dim); font:11px var(--mono); }
+.viewer-option { display:flex; align-items:center; gap:6px; color:var(--text-dim); font-size:11px; }
+.viewer-option select { background:var(--bg-card); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px; font:11px var(--font); }
+.viewer-workspace { display:grid; gap:14px; min-width:0; align-items:start; }
+.viewer-strip { display:flex; gap:8px; overflow-x:auto; padding:8px; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; min-width:0; }
+.viewer-thumb { flex:0 0 100px; min-width:0; padding:5px; background:var(--bg-card); border:2px solid transparent; border-radius:6px; color:var(--text-dim); cursor:pointer; }
+.viewer-thumb:hover { border-color:var(--border-light); }
+.viewer-thumb[aria-pressed="true"] { border-color:var(--accent); color:var(--text); background:var(--bg-active); }
+.viewer-thumb img { display:block; width:86px; height:70px; object-fit:contain; margin:auto; border-radius:3px; }
+.viewer-thumb span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:5px; font:10px var(--mono); }
+.viewer-thumb:focus-visible, .vm-btn:focus-visible, .drop-zone:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.viewer-workspace.has-folder[data-position="left"] { grid-template-columns:124px minmax(0, 1fr); }
+.viewer-workspace.has-folder[data-position="right"] { grid-template-columns:minmax(0, 1fr) 124px; }
+.viewer-workspace.has-folder[data-position="right"] .viewer-strip { grid-column:2; grid-row:1; }
+.viewer-workspace.has-folder[data-position="right"] .viewer-result { grid-column:1; grid-row:1; }
+.viewer-workspace.has-folder:not([data-position="top"]) .viewer-strip { flex-direction:column; overflow-x:hidden; overflow-y:auto; max-height:calc(100vh - 210px); position:sticky; top:12px; }
+.viewer-workspace.has-folder:not([data-position="top"]) .viewer-thumb { flex-basis:auto; }
+.viewer-notice { color:var(--text-dim); font-size:12px; margin:0 0 12px; }
+.viewer-image-error { color:var(--text-dim); font-size:12px; padding:18px 0; }
 .viewer-result { display:none; grid-template-columns:minmax(280px, 42%) minmax(0, 1fr); gap:14px; align-items:start; }
 .viewer-result.visible { display:grid; }
 .viewer-preview { background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:12px; min-width:0; position:sticky; top:12px; }
@@ -230,25 +254,50 @@ PAGE_BODY = r"""
 .vm-edit-textarea:focus { border-color:var(--accent); }
 .vm-btn { border:1px solid var(--border); background:var(--bg-card); color:var(--text); border-radius:6px; padding:8px 12px; font:12px var(--font); cursor:pointer; }
 .vm-btn:hover { border-color:var(--accent); color:var(--text-bright); }
+.vm-btn:disabled { opacity:.45; cursor:default; }
 .vm-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
 .vm-edit-error { color:#f87171; font:11px var(--mono); margin-right:auto; }
 @media (max-width: 860px) {
     .viewer-result { grid-template-columns:1fr; }
     .viewer-preview { position:static; }
+    .viewer-workspace.has-folder[data-position] { grid-template-columns:minmax(0, 1fr); }
+    .viewer-workspace.has-folder[data-position] .viewer-strip { grid-column:1; grid-row:1; flex-direction:row; overflow-x:auto; overflow-y:hidden; max-height:none; position:static; }
+    .viewer-workspace.has-folder[data-position] .viewer-thumb { flex:0 0 100px; }
+    .viewer-workspace.has-folder[data-position] .viewer-result { grid-column:1; grid-row:2; }
+    .viewer-source { flex-wrap:wrap; }
 }
 </style>
 <div class="viewer-content">
-    <div class="drop-zone" id="viewerDrop">
+    <div class="viewer-source">
+    <div class="drop-zone" id="viewerDrop" role="button" tabindex="0" aria-label="Open image">
         <div class="big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="1.5"/><path d="M21 15l-5-5L5 19"/></svg></div>
         <div>
             <div class="drop-main">Drop a PNG, JPG, or WEBP here, or click to select</div>
             <div class="drop-sub">Reads embedded generation metadata locally.</div>
         </div>
-        <input type="file" id="viewerFile" accept=".png,.jpg,.jpeg,.webp">
     </div>
-    <div id="viewerPreview" class="viewer-result">
-        <div class="viewer-preview"><img id="viewerImg" src=""><div class="viewer-file-name" id="viewerFileName"></div></div>
-        <div class="viewer-meta" id="viewerMeta"></div>
+    <button id="viewerOpenFolder" class="vm-btn" type="button">Open folder</button>
+    <input type="file" id="viewerFile" accept=".png,.jpg,.jpeg,.webp" hidden>
+    <input type="file" id="viewerFolder" webkitdirectory multiple hidden>
+    </div>
+    <div class="viewer-folder-bar" id="viewerFolderBar" hidden>
+        <span class="viewer-folder-name" id="viewerFolderName"></span>
+        <span class="viewer-count" id="viewerCount" role="status"></span>
+        <label class="viewer-option"><input type="checkbox" id="viewerSubfolders">Include subfolders</label>
+        <div class="viewer-option"><label for="viewerPosition">Thumbnails</label>
+            <select id="viewerPosition"><option value="top">Top</option><option value="left">Left</option><option value="right">Right</option></select>
+        </div>
+        <button id="viewerPrevious" class="vm-btn" type="button" aria-label="Previous image" title="Previous image (left arrow)" disabled>&larr;</button>
+        <button id="viewerNext" class="vm-btn" type="button" aria-label="Next image" title="Next image (right arrow)" disabled>&rarr;</button>
+        <button id="viewerClear" class="vm-btn" type="button">Close folder</button>
+    </div>
+    <p class="viewer-notice" id="viewerNotice" role="status" hidden></p>
+    <div class="viewer-workspace" id="viewerWorkspace" data-position="top">
+        <div class="viewer-strip" id="viewerStrip" role="group" aria-label="Folder images" hidden></div>
+        <div id="viewerPreview" class="viewer-result">
+            <div class="viewer-preview"><img id="viewerImg" alt="" hidden><div id="viewerImageError" class="viewer-image-error" role="status" hidden></div><div class="viewer-file-name" id="viewerFileName"></div></div>
+            <div class="viewer-meta" id="viewerMeta" aria-live="polite"></div>
+        </div>
     </div>
 </div>
 <div id="metaEditModal" class="vm-modal">
@@ -270,38 +319,239 @@ PAGE_BODY = r"""
 (function() {
     var dropZone = document.getElementById('viewerDrop');
     var fileInput = document.getElementById('viewerFile');
+    var folderInput = document.getElementById('viewerFolder');
+    var strip = document.getElementById('viewerStrip');
+    var workspace = document.getElementById('viewerWorkspace');
+    var positionInput = document.getElementById('viewerPosition');
+    var subfoldersInput = document.getElementById('viewerSubfolders');
+    var previewImage = document.getElementById('viewerImg');
     var currentFile = null;
     var currentData = null;
     var currentImageUrl = '';
     var copyPayloads = {};
+    var folderFiles = [], visibleFiles = [], thumbnails = [];
+    var selectedIndex = -1, analyzeSequence = 0, analyzeController = null;
+    var thumbnailObserver = null;
+    var collator = new Intl.Collator(undefined, {numeric:true, sensitivity:'base'});
+
+    function showNotice(message) {
+        var el = document.getElementById('viewerNotice');
+        el.textContent = message;
+        el.hidden = !message;
+    }
+
+    function setPosition(value) {
+        if (['top', 'left', 'right'].indexOf(value) < 0) value = 'top';
+        positionInput.value = value;
+        workspace.dataset.position = value;
+    }
+    try { setPosition(localStorage.getItem('cyberhub.viewer.thumbnailPosition')); }
+    catch (e) { setPosition('top'); }
+    positionInput.addEventListener('change', function() {
+        setPosition(this.value);
+        try { localStorage.setItem('cyberhub.viewer.thumbnailPosition', this.value); } catch (e) {}
+        if (thumbnails[selectedIndex]) thumbnails[selectedIndex].button.scrollIntoView({block:'nearest', inline:'nearest'});
+    });
+
+    function imageFile(file) { return /\.(png|jpe?g|webp)$/i.test(file.name || ''); }
+    function filePath(file) { return file.webkitRelativePath || file.name; }
+
     dropZone.addEventListener('click', function() { fileInput.click(); });
+    dropZone.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+    });
     dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('dragover'); });
     dropZone.addEventListener('drop', function(e) {
         e.preventDefault(); dropZone.classList.remove('dragover');
-        if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        if (e.dataTransfer.files[0]) openSingleFile(e.dataTransfer.files[0]);
     });
-    fileInput.addEventListener('change', function() { if (this.files[0]) handleFile(this.files[0]); });
+    fileInput.addEventListener('change', function() {
+        if (this.files[0]) openSingleFile(this.files[0]);
+        this.value = '';
+    });
+    document.getElementById('viewerOpenFolder').addEventListener('click', function() {
+        folderInput.value = '';
+        folderInput.click();
+    });
+    if (!('webkitdirectory' in folderInput)) {
+        document.getElementById('viewerOpenFolder').disabled = true;
+        showNotice('Folder selection is unavailable in this browser. You can still open individual images.');
+    }
+    folderInput.addEventListener('change', function() {
+        // A cancelled chooser fires 'cancel'; an empty selection here is an empty folder.
+        var chosen = Array.from(this.files);
+        folderFiles = chosen.filter(imageFile).sort(function(a, b) {
+            return collator.compare(filePath(a), filePath(b));
+        });
+        var folderName = (chosen.length ? chosen[0].webkitRelativePath || '' : '').split('/')[0] || 'Local folder';
+        document.getElementById('viewerFolderName').textContent = folderName;
+        document.getElementById('viewerFolderName').title = folderName;
+        document.getElementById('viewerFolderBar').hidden = false;
+        workspace.classList.add('has-folder');
+        refreshFolder();
+        this.value = '';
+    });
+    subfoldersInput.addEventListener('change', refreshFolder);
+    document.getElementById('viewerPrevious').addEventListener('click', function() { selectImage(selectedIndex - 1); });
+    document.getElementById('viewerNext').addEventListener('click', function() { selectImage(selectedIndex + 1); });
+    document.getElementById('viewerClear').addEventListener('click', clearFolder);
+    document.addEventListener('keydown', function(e) {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented ||
+            e.target.closest('input, textarea, select, [contenteditable], [role="dialog"], .vm-modal, .help-overlay.open') ||
+            document.getElementById('metaEditModal').classList.contains('open')) return;
+        var step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+        if (!step || selectedIndex < 0 || !visibleFiles.length) return;
+        e.preventDefault();
+        selectImage(selectedIndex + step, strip.contains(document.activeElement));
+    });
+
+    function releaseThumbnail(item) {
+        item.image.removeAttribute('src');
+        if (item.url) URL.revokeObjectURL(item.url);
+        item.url = '';
+    }
+    function releaseThumbnails() {
+        if (thumbnailObserver) thumbnailObserver.disconnect();
+        thumbnailObserver = null;
+        thumbnails.forEach(releaseThumbnail);
+        thumbnails = [];
+        strip.replaceChildren();
+    }
+    function resetPreview() {
+        analyzeSequence++;
+        if (analyzeController) analyzeController.abort();
+        analyzeController = null;
+        currentFile = null; currentData = null; copyPayloads = {};
+        closeEditor();
+        previewImage.removeAttribute('src');
+        previewImage.hidden = true;
+        if (currentImageUrl) URL.revokeObjectURL(currentImageUrl);
+        currentImageUrl = '';
+        document.getElementById('viewerImageError').hidden = true;
+        document.getElementById('viewerPreview').classList.remove('visible');
+        document.getElementById('viewerMeta').replaceChildren();
+        document.getElementById('viewerFileName').textContent = '';
+    }
+    function clearFolder() {
+        releaseThumbnails();
+        folderFiles = []; visibleFiles = []; selectedIndex = -1;
+        folderInput.value = '';
+        strip.hidden = true;
+        document.getElementById('viewerFolderBar').hidden = true;
+        workspace.classList.remove('has-folder');
+        resetPreview();
+        updateNavigation();
+        showNotice('');
+    }
+    function openSingleFile(file) {
+        if (!imageFile(file)) { showNotice('Choose a PNG, JPG, or WEBP image.'); return; }
+        clearFolder();
+        handleFile(file);
+    }
+    function updateNavigation() {
+        document.getElementById('viewerPrevious').disabled = selectedIndex <= 0;
+        document.getElementById('viewerNext').disabled = selectedIndex < 0 || selectedIndex >= visibleFiles.length - 1;
+        document.getElementById('viewerCount').textContent = visibleFiles.length ?
+            (selectedIndex + 1) + ' / ' + visibleFiles.length : '0 images';
+    }
+    function refreshFolder() {
+        var previousFile = currentFile;
+        resetPreview();
+        releaseThumbnails();
+        visibleFiles = folderFiles.filter(function(file) {
+            return subfoldersInput.checked || filePath(file).split('/').length <= 2;
+        });
+        selectedIndex = -1;
+        strip.hidden = !visibleFiles.length;
+        showNotice(visibleFiles.length ? '' : folderFiles.length ?
+            'No images in this folder. Enable Include subfolders to see images in its subfolders.' :
+            'No PNG, JPG, or WEBP images found in the selected folder.');
+        // Only keep image URLs near the visible part of the strip, even for large folders.
+        if ('IntersectionObserver' in window) {
+            thumbnailObserver = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    var item = thumbnails[Number(entry.target.dataset.index)];
+                    if (!item || item.button !== entry.target) return;
+                    if (entry.isIntersecting) {
+                        if (!item.url) { item.url = URL.createObjectURL(item.file); item.image.src = item.url; }
+                    } else releaseThumbnail(item);
+                });
+            }, {root:strip, rootMargin:'160px'});
+        }
+        var fragment = document.createDocumentFragment();
+        visibleFiles.forEach(function(file, index) {
+            var button = document.createElement('button');
+            button.type = 'button'; button.className = 'viewer-thumb'; button.dataset.index = index;
+            button.title = filePath(file); button.setAttribute('aria-label', filePath(file));
+            button.setAttribute('aria-pressed', 'false'); button.tabIndex = -1;
+            var img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+            var label = document.createElement('span'); label.textContent = file.name;
+            var item = {button:button, image:img, file:file, url:''};
+            thumbnails.push(item);
+            img.addEventListener('error', function() { button.title = filePath(file) + ' — Preview unavailable'; });
+            button.append(img, label);
+            button.addEventListener('click', function() { selectImage(index); });
+            fragment.appendChild(button);
+            if (!thumbnailObserver) { item.url = URL.createObjectURL(file); img.src = item.url; }
+        });
+        strip.appendChild(fragment);
+        if (thumbnailObserver) thumbnails.forEach(function(item) { thumbnailObserver.observe(item.button); });
+        if (visibleFiles.length) selectImage(Math.max(0, visibleFiles.indexOf(previousFile)));
+        else updateNavigation();
+    }
+    function selectImage(index, focus) {
+        if (index < 0 || index >= visibleFiles.length || index === selectedIndex) return;
+        if (thumbnails[selectedIndex]) {
+            thumbnails[selectedIndex].button.setAttribute('aria-pressed', 'false');
+            thumbnails[selectedIndex].button.tabIndex = -1;
+        }
+        selectedIndex = index;
+        var button = thumbnails[index].button;
+        button.setAttribute('aria-pressed', 'true'); button.tabIndex = 0;
+        button.scrollIntoView({block:'nearest', inline:'nearest'});
+        if (focus) button.focus({preventScroll:true});
+        updateNavigation();
+        handleFile(visibleFiles[index]);
+    }
 
     function handleFile(file) {
         if (!file) return;
+        resetPreview();
+        showNotice('');
         currentFile = file;
-        currentData = null;
-        copyPayloads = {};
-        if (currentImageUrl) URL.revokeObjectURL(currentImageUrl);
         currentImageUrl = URL.createObjectURL(file);
-        document.getElementById('viewerImg').src = currentImageUrl;
-        document.getElementById('viewerFileName').textContent = file.name;
+        previewImage.src = currentImageUrl;
+        previewImage.alt = file.name;
+        previewImage.hidden = false;
+        document.getElementById('viewerFileName').textContent = filePath(file);
+        document.getElementById('viewerFileName').title = filePath(file);
         document.getElementById('viewerPreview').classList.add('visible');
+        document.getElementById('viewerMeta').innerHTML = '<div class="vm-empty">Reading metadata...</div>';
+        var sequence = analyzeSequence;
+        analyzeController = new AbortController();
         var fd = new FormData(); fd.append('file', file);
-        fetch('/api/viewer/analyze', { method:'POST', body:fd })
-            .then(function(r) { return r.json(); })
-            .then(function(data) { renderMeta(data, file); })
+        fetch('/api/viewer/analyze', {method:'POST', body:fd, signal:analyzeController.signal})
+            .then(function(r) {
+                return r.json().then(function(data) {
+                    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+                    return data;
+                });
+            })
+            .then(function(data) { if (sequence === analyzeSequence) renderMeta(data, file); })
             .catch(function(e) {
+                if (sequence !== analyzeSequence || e.name === 'AbortError') return;
                 document.getElementById('viewerMeta').innerHTML =
                     '<div class="vm-empty">Error: ' + escHtml(e.message) + '</div>';
             });
     }
+    previewImage.addEventListener('error', function() {
+        if (!currentFile || previewImage.getAttribute('src') !== currentImageUrl) return;
+        previewImage.hidden = true;
+        var error = document.getElementById('viewerImageError');
+        error.textContent = 'This image could not be displayed. You can select another image.';
+        error.hidden = false;
+    });
 
     function renderMeta(data, file) {
         var el = document.getElementById('viewerMeta');
@@ -469,8 +719,9 @@ PAGE_BODY = r"""
         var old = btn.textContent;
         btn.disabled = true;
         btn.textContent = 'Saving...';
+        var editedFile = currentFile;
         var fd = new FormData();
-        fd.append('file', currentFile, currentFile.name);
+        fd.append('file', editedFile, editedFile.name);
         fd.append('raw_meta_json', new Blob([JSON.stringify(raw)], {type:'application/json'}), 'metadata.json');
         fetch('/api/viewer/rewrite', {method:'POST', body:fd})
             .then(function(r) {
@@ -482,7 +733,7 @@ PAGE_BODY = r"""
             .then(function(blob) {
                 var a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = (currentFile.name || 'image.png').replace(/\.png$/i, '') + '_metadata.png';
+                a.download = (editedFile.name || 'image.png').replace(/\.png$/i, '') + '_metadata.png';
                 a.click();
                 setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
                 closeEditor();
